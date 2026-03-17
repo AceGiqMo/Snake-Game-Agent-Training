@@ -1,0 +1,352 @@
+import pygame
+import sys
+import random
+
+# Configuration
+GRID_SIZE = 20
+CELL_SIZE = 30
+WIDTH, HEIGHT = GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE
+FPS = 4
+
+# Colors
+BLACK = (0, 0, 0)
+GREEN = (0, 255, 0)
+GRAY = (40, 40, 40)
+DARK_GRAY = (60, 60, 60)
+BLUE = (0, 100, 255)
+WHITE = (255, 255, 255)
+EYE_COLOR = (128, 0, 0)
+FOOD_COLOR = (255, 0, 0)
+SUPER_FOOD_COLOR = (0, 180, 255)  # Bright cyan
+
+# Initialize Pygame
+pygame.init()
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Snake Game with Food, Super Food, Victory, and Safe Obstacles")
+clock = pygame.time.Clock()
+
+# Fonts
+font_large = pygame.font.SysFont("Arial", 32)
+font_small = pygame.font.SysFont("Arial", 18)
+font_score = pygame.font.SysFont("Arial", 24)
+
+# Reset game state
+def reset_game():
+    snake = [[GRID_SIZE // 2, GRID_SIZE // 2], [GRID_SIZE // 2 - 1, GRID_SIZE // 2], [GRID_SIZE // 2 - 2, GRID_SIZE // 2]]
+    direction = [1, 0]
+    food = generate_food(snake, obstacles)
+    eaten_food = 0
+    score = 0
+    return snake, direction, food, eaten_food, score
+
+# Generate food in a free cell (not on snake or obstacles)
+def generate_food(snake, obstacles):
+    all_cells = {(x, y) for x in range(GRID_SIZE) for y in range(GRID_SIZE)}
+    occupied = {tuple(segment) for segment in snake}
+    for x in range(GRID_SIZE):
+        for y in range(GRID_SIZE):
+            if obstacles[x][y]:
+                occupied.add((x, y))
+    available = all_cells - occupied
+    if not available:
+        return None
+    return list(random.choice(list(available)))
+
+# Get all cells within radius around head (safe zone)
+def get_safe_zone_around_head(head, radius=3):
+    safe_zone = set()
+    hx, hy = head
+    for dx in range(-radius, radius + 1):
+        for dy in range(-radius, radius + 1):
+            nx, ny = hx + dx, hy + dy
+            if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE:
+                safe_zone.add((nx, ny))
+    return safe_zone
+
+# Generate obstacles as a 2D boolean matrix, avoiding safe zone around head
+def generate_obstacles(snake, num_obstacles):
+    obstacles = [[False] * GRID_SIZE for _ in range(GRID_SIZE)]
+    all_cells = {(x, y) for x in range(1,GRID_SIZE-1) for y in range(1, GRID_SIZE-1)}
+    occupied = {tuple(segment) for segment in snake}
+    safe_zone = get_safe_zone_around_head(snake[0], radius=3)
+    available = all_cells - occupied - safe_zone
+    if len(available) < num_obstacles:
+        num_obstacles = len(available)
+    selected = random.sample(list(available), num_obstacles) if available else []
+    for x, y in selected:
+        obstacles[x][y] = True
+    return obstacles
+
+# Draw snake head with eyes (NO MOUTH)
+def draw_head(screen, x, y, direction):
+    rect_x = x * CELL_SIZE
+    rect_y = y * CELL_SIZE
+    pygame.draw.rect(screen, GREEN, (rect_x, rect_y, CELL_SIZE, CELL_SIZE))
+    eye_size = CELL_SIZE // 5
+    eye_offset = CELL_SIZE // 4
+    if direction == [1, 0]:  # Right
+        left_eye = (rect_x + CELL_SIZE - eye_offset, rect_y + eye_offset)
+        right_eye = (rect_x + CELL_SIZE - eye_offset, rect_y + CELL_SIZE - eye_offset)
+    elif direction == [-1, 0]:  # Left
+        left_eye = (rect_x + eye_offset, rect_y + eye_offset)
+        right_eye = (rect_x + eye_offset, rect_y + CELL_SIZE - eye_offset)
+    elif direction == [0, -1]:  # Up
+        left_eye = (rect_x + eye_offset, rect_y + eye_offset)
+        right_eye = (rect_x + CELL_SIZE - eye_offset, rect_y + eye_offset)
+    elif direction == [0, 1]:  # Down
+        left_eye = (rect_x + eye_offset, rect_y + CELL_SIZE - eye_offset)
+        right_eye = (rect_x + CELL_SIZE - eye_offset, rect_y + CELL_SIZE - eye_offset)
+    pygame.draw.circle(screen, EYE_COLOR, left_eye, eye_size)
+    pygame.draw.circle(screen, EYE_COLOR, right_eye, eye_size)
+
+# Show menu to select mode
+def show_menu():
+    screen.fill(BLACK)
+    title = font_large.render("SNAKE", True, GREEN)
+    subtitle = font_small.render("Choose Mode:", True, WHITE)
+    option1 = font_small.render("1 - Collision (Press 1)", True, BLUE)
+    option2 = font_small.render("2 - Teleport (Press 2)", True, BLUE)
+    screen.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 2 - 100))
+    screen.blit(subtitle, (WIDTH // 2 - subtitle.get_width() // 2, HEIGHT // 2 - 40))
+    screen.blit(option1, (WIDTH // 2 - option1.get_width() // 2, HEIGHT // 2))
+    screen.blit(option2, (WIDTH // 2 - option2.get_width() // 2, HEIGHT // 2 + 40))
+    pygame.display.flip()
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_1:
+                    return 1  # Collision mode
+                elif event.key == pygame.K_2:
+                    return 2  # Teleport mode
+
+# Show victory screen
+def show_victory():
+    screen.fill(BLACK)
+    title = font_large.render("VICTORY!", True, GREEN)
+    subtitle = font_small.render("You ate 20 pieces of food!", True, WHITE)
+    restart = font_small.render("Press SPACE to restart", True, BLUE)
+    screen.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 2 - 60))
+    screen.blit(subtitle, (WIDTH // 2 - subtitle.get_width() // 2, HEIGHT // 2))
+    screen.blit(restart, (WIDTH // 2 - restart.get_width() // 2, HEIGHT // 2 + 60))
+    pygame.display.flip()
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    return
+
+# Main game loop
+running = True
+game_mode = show_menu()
+
+# Calculate 12% of grid cells for obstacles
+total_cells = GRID_SIZE * GRID_SIZE
+num_obstacles = max(1, int(total_cells * 0.12))
+
+# Initial snake position
+snake_init = [[GRID_SIZE // 2, GRID_SIZE // 2], [GRID_SIZE // 2 - 1, GRID_SIZE // 2], [GRID_SIZE // 2 - 2, GRID_SIZE // 2]]
+obstacles = generate_obstacles(snake_init, num_obstacles)
+
+# Reset game
+snake, direction, food, eaten_food, score = reset_game()
+
+# Super food settings
+super_food = None
+super_food_active = False
+super_food_timer = 0
+move_counter = 0  # Counts total moves
+
+game_over = False
+victory = False
+
+while running:
+    command_processed = False
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        elif event.type == pygame.KEYDOWN:
+            if not game_over and not victory:
+                if not command_processed:
+                    if event.key == pygame.K_UP and direction != [0, 1]:
+                        direction = [0, -1]
+                        command_processed = True
+                    elif event.key == pygame.K_DOWN and direction != [0, -1]:
+                        direction = [0, 1]
+                        command_processed = True
+                    elif event.key == pygame.K_LEFT and direction != [1, 0]:
+                        direction = [-1, 0]
+                        command_processed = True
+                    elif event.key == pygame.K_RIGHT and direction != [-1, 0]:
+                        direction = [1, 0]
+                        command_processed = True
+            else:
+                if event.key == pygame.K_SPACE:
+                    game_mode = show_menu()
+                    snake_init = [[GRID_SIZE // 2, GRID_SIZE // 2], [GRID_SIZE // 2 - 1, GRID_SIZE // 2], [GRID_SIZE // 2 - 2, GRID_SIZE // 2]]
+                    obstacles = generate_obstacles(snake_init, num_obstacles)
+                    snake, direction, food, eaten_food, score = reset_game()
+                    super_food = None
+                    super_food_active = False
+                    super_food_timer = 0
+                    move_counter = 0
+                    game_over = False
+                    victory = False
+
+    if not game_over and not victory:
+        # Increment move counter
+        move_counter += 1
+
+        # Generate super food every 50 moves, lasts 20 moves
+        if not super_food_active and move_counter % 50 == 0:
+            super_food = generate_food(snake, obstacles)
+            if super_food:
+                super_food_active = True
+                super_food_timer = 20  # 20 moves duration
+
+        # Decrement super food timer
+        if super_food_active:
+            super_food_timer -= 1
+            if super_food_timer <= 0:
+                super_food_active = False
+                super_food = None
+
+        # Move snake
+        head = snake[0].copy()
+        head[0] += direction[0]
+        head[1] += direction[1]
+
+        # Teleport through walls (mode 2 only)
+        if game_mode == 2:
+            if head[0] < 0: head[0] = GRID_SIZE - 1
+            if head[0] >= GRID_SIZE: head[0] = 0
+            if head[1] < 0: head[1] = GRID_SIZE - 1
+            if head[1] >= GRID_SIZE: head[1] = 0
+
+        # Check collision with obstacles (always lethal)
+        if 0 <= head[0] < GRID_SIZE and 0 <= head[1] < GRID_SIZE:
+            if obstacles[head[0]][head[1]]:
+                game_over = True
+        else:
+            # Wall collision only in mode 1
+            if game_mode == 1:
+                game_over = True
+
+        # Self-collision
+        if head in snake[:-1]:
+            game_over = True
+
+        # Add new head
+        snake.insert(0, head)
+
+        # Eat food
+        ate_food = (head == food)
+        ate_super_food = super_food_active and (head == super_food)
+
+        if ate_food:
+            food = generate_food(snake, obstacles)  # Generate new food
+            eaten_food += 1
+            score += 1  # +1 point
+
+        elif ate_super_food:
+            super_food = None
+            super_food_active = False
+            eaten_food += 2  # Super food = 2 foods
+            score += 2       # +2 score
+
+        # Delete tail if there's nothing eaten
+        if not (ate_food or ate_super_food):
+            snake.pop()
+        else:
+            if ate_super_food:
+                if len(snake) > 1:
+                    tail_segment = snake[-1].copy()
+                    snake.append(tail_segment)  # +1 segment (overall +2: head + tail)
+
+        # Check victory
+        if eaten_food >= 20:
+            victory = True
+
+    # Draw everything
+    screen.fill(BLACK)
+
+    # Draw grid
+    for x in range(GRID_SIZE):
+        for y in range(GRID_SIZE):
+            rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+            pygame.draw.rect(screen, GRAY, rect, 1)
+
+    # Draw obstacles
+    for x in range(GRID_SIZE):
+        for y in range(GRID_SIZE):
+            if obstacles[x][y]:
+                obs_rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                pygame.draw.rect(screen, DARK_GRAY, obs_rect)
+
+    # Draw snake body
+    for segment in snake[1:]:
+        rect = pygame.Rect(segment[0] * CELL_SIZE, segment[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+        pygame.draw.rect(screen, GREEN, rect)
+
+    # Draw head
+    if snake:
+        draw_head(screen, snake[0][0], snake[0][1], direction)
+
+    # Draw food
+    if food:
+        food_rect = pygame.Rect(food[0] * CELL_SIZE, food[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+        pygame.draw.rect(screen, FOOD_COLOR, food_rect)
+
+    # Draw super food
+    if super_food_active:
+        super_food_rect = pygame.Rect(super_food[0] * CELL_SIZE, super_food[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+        pygame.draw.rect(screen, SUPER_FOOD_COLOR, super_food_rect)
+        # Optional: draw a border or glow effect
+        pygame.draw.rect(screen, WHITE, super_food_rect, 2)
+
+    # Draw UI
+    score_text = font_score.render(f"Eaten: {eaten_food}/20 | Score: {score}", True, WHITE)
+    screen.blit(score_text, (5, 5))
+
+    mode_text = "Mode: Collision" if game_mode == 1 else "Mode: Teleport"
+    mode_render = font_small.render(mode_text, True, BLUE)
+    screen.blit(mode_render, (5, HEIGHT - 25))
+
+    obstacle_count = sum(row.count(True) for row in obstacles)
+    obs_text = font_small.render(f"Obstacles: {obstacle_count}", True, WHITE)
+    screen.blit(obs_text, (WIDTH - obs_text.get_width() - 5, HEIGHT - 25))
+
+    # Super food timer indicator
+    if super_food_active:
+        timer_text = font_small.render(f"Super Food: {super_food_timer} moves left", True, SUPER_FOOD_COLOR)
+        screen.blit(timer_text, (WIDTH // 2 - timer_text.get_width() // 2, HEIGHT - 25))
+
+    # Game over screen
+    if game_over:
+        text = font_small.render("GAME OVER! Press SPACE to restart", True, WHITE)
+        screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2))
+
+    # Victory screen
+    if victory:
+        show_victory()
+        game_mode = show_menu()
+        snake_init = [[GRID_SIZE // 2, GRID_SIZE // 2], [GRID_SIZE // 2 - 1, GRID_SIZE // 2], [GRID_SIZE // 2 - 2, GRID_SIZE // 2]]
+        obstacles = generate_obstacles(snake_init, num_obstacles)
+        snake, direction, food, eaten_food, score = reset_game()
+        super_food = None
+        super_food_active = False
+        super_food_timer = 0
+        move_counter = 0
+        game_over = False
+        victory = False
+
+    pygame.display.flip()
+    clock.tick(FPS)
+
+pygame.quit()
+sys.exit()
