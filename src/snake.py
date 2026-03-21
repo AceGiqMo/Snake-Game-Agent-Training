@@ -6,7 +6,7 @@ import random
 GRID_SIZE = 20
 CELL_SIZE = 30
 WIDTH, HEIGHT = GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE
-FPS = 4
+FPS = 6
 
 # Colors
 BLACK = (0, 0, 0)
@@ -248,6 +248,7 @@ class SnakeGame:
         if self.game_over:
             text = font_small.render("GAME OVER! Press SPACE to restart", True, WHITE)
             screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2))
+
         elif self.victory:
             self._show_victory_screen()
 
@@ -261,6 +262,9 @@ class SnakeGame:
 
         eye_size = CELL_SIZE // 5
         eye_offset = CELL_SIZE // 4
+
+        left_eye = None
+        right_eye = None
 
         if direction == [1, 0]:  # Right
             left_eye = (rect_x + CELL_SIZE - eye_offset, rect_y + eye_offset)
@@ -354,7 +358,6 @@ def main():
 
     pygame.quit()
     sys.exit()
-
 
 
 if __name__ == "__main__":
