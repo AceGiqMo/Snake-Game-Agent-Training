@@ -1,1 +1,107 @@
+from collections import deque
+def _generate_obstacles(self):
+    max_attempts = 1000
 
+    for _ in range(max_attempts):
+        obstacles = [[False] * GRID_SIZE for _ in range(GRID_SIZE)]
+
+        all_cells = {
+            (x, y)
+            for x in range(1, GRID_SIZE - 1)
+            for y in range(1, GRID_SIZE - 1)
+        }
+
+        occupied = {tuple(segment) for segment in self.snake}
+        safe_zone = self._get_safe_zone_around_head(self.snake[0], radius=3)
+        available = all_cells - occupied - safe_zone
+
+        num_obstacles = min(self.num_obstacles, len(available))
+        selected = random.sample(list(available), num_obstacles) if available else []
+
+        for x, y in selected:
+            obstacles[x][y] = True
+
+        if self._is_map_connected_bfs(obstacles) and not self._has_dead_ends_or_pockets(obstacles):
+            return obstacles
+
+    return [[False] * GRID_SIZE for _ in range(GRID_SIZE)]
+def _is_map_connected_bfs(self, obstacles):
+    snake_cells = {tuple(segment) for segment in self.snake}
+    free_cells = []
+
+    for x in range(GRID_SIZE):
+        for y in range(GRID_SIZE):
+            if not obstacles[x][y] and (x, y) not in snake_cells:
+                free_cells.append((x, y))
+
+    if not free_cells:
+        return True
+
+    start = free_cells[0]
+    queue = deque([start])
+    visited = {start}
+
+    while queue:
+        cx, cy = queue.popleft()
+
+        for nx, ny in self._get_free_neighbors(cx, cy, obstacles):
+            if (nx, ny) not in visited:
+                visited.add((nx, ny))
+                queue.append((nx, ny))
+
+    return len(visited) == len(free_cells)
+def _get_free_neighbors(self, x, y, obstacles):
+    neighbors = []
+    snake_cells = {tuple(segment) for segment in self.snake}
+
+    for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+        nx, ny = x + dx, y + dy
+
+        if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE:
+            if not obstacles[nx][ny] and (nx, ny) not in snake_cells:
+                neighbors.append((nx, ny))
+
+    return neighbors
+def _has_dead_ends_or_pockets(self, obstacles):
+    snake_cells = {tuple(segment) for segment in self.snake}
+    safe_zone = self._get_safe_zone_around_head(self.snake[0], radius=2)
+    checked = set()
+
+    for x in range(GRID_SIZE):
+        for y in range(GRID_SIZE):
+            if obstacles[x][y]:
+                continue
+            if (x, y) in snake_cells:
+                continue
+            if (x, y) in safe_zone:
+                continue
+            if (x, y) in checked:
+                continue
+
+            neighbors = self._get_free_neighbors(x, y, obstacles)
+
+            if len(neighbors) == 1:
+                corridor = []
+                prev = None
+                current = (x, y)
+
+                while True:
+                    corridor.append(current)
+                    checked.add(current)
+
+                    current_neighbors = self._get_free_neighbors(current[0], current[1], obstacles)
+                    next_neighbors = [n for n in current_neighbors if n != prev]
+
+                    if len(next_neighbors) != 1:
+                        break
+
+                    prev = current
+                    current = next_neighbors[0]
+
+                    if current in corridor:
+                        break
+
+                if len(corridor) >= 2:
+                    return True
+
+    return False
