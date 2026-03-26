@@ -2,23 +2,6 @@ import pygame
 import sys
 import random
 
-# Configuration
-GRID_SIZE = 20
-CELL_SIZE = 30
-WIDTH, HEIGHT = GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE
-FPS = 6
-
-# Colors
-BLACK = (0, 0, 0)
-GREEN = (0, 255, 0)
-GRAY = (40, 40, 40)
-DARK_GRAY = (60, 60, 60)
-BLUE = (0, 100, 255)
-WHITE = (255, 255, 255)
-EYE_COLOR = (128, 0, 0)
-FOOD_COLOR = (255, 0, 0)
-SUPER_FOOD_COLOR = (0, 180, 255)
-
 # Initialize Pygame
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -39,14 +22,12 @@ class SnakeGame:
 
     def __init__(self, game_mode=1, num_obstacles_ratio=0.12):
         self.game_mode = game_mode  # 1 = collision, 2 = teleport
-        self.num_obstacles = max(1, int(GRID_SIZE * GRID_SIZE * num_obstacles_ratio))
         self.reset()
 
     def reset(self):
         """Reset the entire game state to initial values."""
         self.snake = [[GRID_SIZE // 2, GRID_SIZE // 2], [GRID_SIZE // 2 - 1, GRID_SIZE // 2], [GRID_SIZE // 2 - 2, GRID_SIZE // 2]]
         self.direction = [1, 0]  # Start moving right
-        self.obstacles = self._generate_obstacles()
         self.food = self._generate_food()
         self.super_food = None
         self.super_food_active = False
@@ -56,34 +37,6 @@ class SnakeGame:
         self.score = 0
         self.game_over = False
         self.victory = False
-
-    def _generate_obstacles(self):
-        """Generate obstacle grid, avoiding safe zone around head."""
-        obstacles = [[False] * GRID_SIZE for _ in range(GRID_SIZE)]
-        all_cells = {(x, y) for x in range(1, GRID_SIZE - 1) for y in range(1, GRID_SIZE - 1)}
-        occupied = {tuple(segment) for segment in self.snake}
-        safe_zone = self._get_safe_zone_around_head(self.snake[0], radius=3)
-        available = all_cells - occupied - safe_zone
-
-        if len(available) < self.num_obstacles:
-            self.num_obstacles = len(available)
-
-        selected = random.sample(list(available), self.num_obstacles) if available else []
-        for x, y in selected:
-            obstacles[x][y] = True
-
-        return obstacles
-
-    def _get_safe_zone_around_head(self, head, radius=3):
-        """Return set of all cells within radius around head (safe spawn zone)."""
-        safe_zone = set()
-        hx, hy = head
-        for dx in range(-radius, radius + 1):
-            for dy in range(-radius, radius + 1):
-                nx, ny = hx + dx, hy + dy
-                if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE:
-                    safe_zone.add((nx, ny))
-        return safe_zone
 
     def _generate_food(self):
         """Generate food in a random free cell (not on snake or obstacles)."""

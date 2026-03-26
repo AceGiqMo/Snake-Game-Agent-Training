@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -163,7 +162,6 @@ class SnakeAgent:
     def __init__(
         self,
         *,
-        architecture_csv: str | Path = "nn_architecture.csv",
         input_size: int = 20,
         hidden1: int = 256,
         hidden2: int = 128,
