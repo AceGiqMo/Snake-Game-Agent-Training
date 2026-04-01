@@ -2,8 +2,8 @@ import random
 import os
 import shutil
 
+import numpy as np
 import pandas as pd
-import pyarrow.parquet as pq
 
 from collections import deque
 
@@ -28,7 +28,7 @@ class MapManager:
 
         return safe_zone
 
-    def generate_map(self) -> list[list[bool]]:
+    def generate_map(self) -> np.ndarray:
         while True:
             obstacles = [[False] * self.column_size for _ in range(self.row_size)]
 
@@ -49,15 +49,15 @@ class MapManager:
                 obstacles[y][x] = True
 
             if self._is_map_connected_bfs(obstacles) and not self._has_dead_ends(obstacles):
-                return obstacles
+                return np.array(obstacles, dtype=np.bool)
 
-    def generate_maps(self, num) -> list[list[list[bool]]]:
+    def generate_maps(self, num) -> np.ndarray:
         maps = []
 
         for _ in range(num):
             maps.append(self.generate_map())
 
-        return maps
+        return np.array(maps, dtype=np.bool)
 
     def save_maps(self, maps):
         shutil.rmtree(f"{os.getcwd()}/maps")
@@ -67,7 +67,7 @@ class MapManager:
             df = pd.DataFrame(maps[i])
             df.to_parquet(f'{os.getcwd()}/maps/map_{i + 1}.parquet', engine='pyarrow')
 
-    def load_maps(self) -> list[list[list[bool]]]:
+    def load_maps(self) -> np.ndarray:
         maps = []
 
         for filename in os.listdir(f"{os.getcwd()}/maps"):
@@ -77,8 +77,7 @@ class MapManager:
             df = pd.read_parquet(f"{os.getcwd()}/maps/{filename}")
             maps.append(df.to_numpy().tolist())
 
-        return maps
-
+        return np.array(maps)
 
     def _is_map_connected_bfs(self, obstacles) -> bool:
         snake_cells = {tuple(segment) for segment in self.snake_cells}

@@ -8,7 +8,6 @@ class PSO:
                  ndims: int,
                  popsize: int,
                  positions: np.ndarray,
-                 fitness_calculator: types.FunctionType | type,
                  lower_bound: float,
                  upper_bound: float,
                  inertia=1,
@@ -18,24 +17,35 @@ class PSO:
 
         self.ndims = ndims
         self.popsize = popsize
-        self.fitness_calculator = fitness_calculator
         self.inertia = inertia
         self.c1 = c1
         self.c2 = c2
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
 
-        self.rgen = np.random.default_rng(seed=rng)
+        self.rgen = rng or np.random.default_rng()
 
         self.positions = positions
         self.velocities = self.rgen.normal(loc=0.0, scale=0.1, size=(self.popsize, self.ndims))
 
-        self.fitnesses = self.fitness_calculator(self.positions)
+        self.fitnesses = np.full(fill_value=-1, shape=self.popsize)
 
-        self.global_best = self.positions[np.argmax(self.fitnesses)]
+        self.global_best = self.rgen.choice(self.positions, axis=0)
         self.local_bests = copy.deepcopy(self.positions)
         self.global_best_fitness = -1
         self.local_best_fitnesses = np.full(fill_value=-1, shape=self.popsize)
+
+    def update_fitness(self, new_fitnesses):
+        mask = self.fitnesses < new_fitnesses
+
+        self.local_bests[mask] = copy.deepcopy(self.positions[mask])
+        self.local_best_fitnesses[mask] = np.copy(new_fitnesses[mask])
+
+        if np.any(self.global_best_fitness < self.local_best_fitnesses):
+            self.global_best = self.local_bests[np.argmax(new_fitnesses)]
+            self.global_best_fitness = self.local_best_fitnesses[np.argmax(new_fitnesses)]
+
+        self.fitnesses = new_fitnesses
 
 
     def update_velocities(self):
@@ -50,23 +60,13 @@ class PSO:
         self.positions += self.velocities
         self.positions = np.clip(self.positions, a_min=self.lower_bound, a_max=self.upper_bound)
 
-        new_fitnesses = self.fitness_calculator()
-        mask = self.fitnesses < new_fitnesses
+    def restore_best_points(self, best_points):
+        self.local_bests = best_points
+        self.global_best = self.local_bests[np.argmax(self.local_best_fitnesses)]
 
-        self.local_bests[mask] = copy.deepcopy(self.positions[mask])
-        self.local_best_fitnesses[mask] = np.copy(new_fitnesses[mask])
+    def restore_best_fitnesses(self, best_fitnesses):
+        self.local_best_fitnesses = best_fitnesses
+        self.global_best_fitness = self.local_best_fitnesses[np.argmax(self.local_best_fitnesses)]
 
-        if np.any(self.global_best_fitness < self.local_best_fitnesses):
-            self.global_best = self.local_bests[np.argmax(new_fitnesses)]
-            self.global_best_fitness = self.local_best_fitnesses[np.argmax(new_fitnesses)]
-
-        self.fitnesses = new_fitnesses
-
-
-
-
-
-
-
-
-
+    def restore_last_fitnesses(self, last_fitnesses):
+        self.fitnesses = last_fitnesses

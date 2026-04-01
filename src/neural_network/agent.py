@@ -162,7 +162,7 @@ class SnakeAgent:
     def __init__(
         self,
         *,
-        input_size: int = 20,
+        input_size: int = 23,
         hidden1: int = 256,
         hidden2: int = 128,
         rng: Optional[np.random.Generator] = None,
@@ -173,7 +173,7 @@ class SnakeAgent:
 
     def act(self, observation: np.ndarray) -> int:
         """Returns 0..3 for (UP, DOWN, LEFT, RIGHT)."""
-        return self.net.predict_action(observation)
+        return SnakeAgent.ACTIONS[self.net.predict_action(observation)]
 
     def action_probabilities(self, observation: np.ndarray) -> np.ndarray:
         """Returns softmax probabilities of length 4."""
