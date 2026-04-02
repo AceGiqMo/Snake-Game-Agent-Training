@@ -70,6 +70,12 @@ logs/
 *.log
 
 # --------------------------
+# JUPYTER NOTEBOOK
+# --------------------------
+.ipynb_checkpoints
+.ipynb_checkpoints/
+
+# --------------------------
 # TESTING
 # --------------------------
 coverage/

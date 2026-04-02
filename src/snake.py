@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+import logging
 
 SUPER_FOOD_MAX_TIME = 20       # Lasts 20 frames
 
@@ -37,6 +38,7 @@ class SnakeGame:
         self.score = 0
         self.game_over = False
         self.victory = False
+        self._actions = {}
 
     def _generate_food(self):
         """Generate food in a random free cell (not on snake or obstacles)."""
@@ -114,14 +116,21 @@ class SnakeGame:
 
     def handle_action(self, action):
         """Process only the first valid keyboard input per frame (no multiple commands)."""
-        if action == "UP" and self.direction != [0, 1]:
+        if action == "UP" and self.direction != [0, 1] and self.direction != [0, -1]:
             self.direction = [0, -1]
-        elif action == "DOWN" and self.direction != [0, -1]:
+            self._actions[self.frame] = action
+
+        elif action == "DOWN" and self.direction != [0, -1] and self.direction != [0, 1]:
             self.direction = [0, 1]
-        elif action == "LEFT" and self.direction != [1, 0]:
+            self._actions[self.frame] = action
+
+        elif action == "LEFT" and self.direction != [1, 0] and self.direction != [-1, 0]:
             self.direction = [-1, 0]
-        elif action == "RIGHT" and self.direction != [-1, 0]:
+            self._actions[self.frame] = action
+
+        elif action == "RIGHT" and self.direction != [-1, 0] and self.direction != [1, 0]:
             self.direction = [1, 0]
+            self._actions[self.frame] = action
         # Any other action is ignored
 
     def update(self):

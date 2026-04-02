@@ -1,6 +1,6 @@
 import numpy as np
-import types
 import copy
+import logging
 
 
 class PSO:
@@ -64,9 +64,25 @@ class PSO:
         self.local_bests = best_points
         self.global_best = self.local_bests[np.argmax(self.local_best_fitnesses)]
 
+        logging.info("Best points were successfully restored from the previous sessions")
+
     def restore_best_fitnesses(self, best_fitnesses):
         self.local_best_fitnesses = best_fitnesses
         self.global_best_fitness = self.local_best_fitnesses[np.argmax(self.local_best_fitnesses)]
 
+        logging.info("Best fitnesses were successfully restored from the previous sessions")
+
+    def restore_positions(self, positions):
+        self.positions = positions
+
+        logging.info("Last positions were successfully restored from the previous session")
+
+    def restore_velocities(self, velocities):
+        self.velocities = velocities
+
+        logging.info("Last velocities were successfully restored from the previous session")
+
     def restore_last_fitnesses(self, last_fitnesses):
         self.fitnesses = last_fitnesses
+
+        logging.info("Last fitnesses were successfully restored from the previous session")

@@ -7,6 +7,8 @@ import pandas as pd
 
 from collections import deque
 
+import logging
+
 
 class MapManager:
     def __init__(self, row_size, column_size, snake_start_cells, *, num_obstacles_ratio=0.12):
@@ -57,15 +59,20 @@ class MapManager:
         for _ in range(num):
             maps.append(self.generate_map())
 
+        logging.info(f"New {num} maps were generated")
         return np.array(maps, dtype=np.bool)
 
     def save_maps(self, maps):
+        logging.info("The maps are getting saved into the ./maps/ directory...")
+
         shutil.rmtree(f"{os.getcwd()}/maps")
         os.mkdir(f"{os.getcwd()}/maps")
 
         for i in range(len(maps)):
             df = pd.DataFrame(maps[i])
             df.to_parquet(f'{os.getcwd()}/maps/map_{i + 1}.parquet', engine='pyarrow')
+
+        logging.info("The maps were successfully saved")
 
     def load_maps(self) -> np.ndarray:
         maps = []
@@ -76,6 +83,8 @@ class MapManager:
 
             df = pd.read_parquet(f"{os.getcwd()}/maps/{filename}")
             maps.append(df.to_numpy().tolist())
+
+        logging.info("")
 
         return np.array(maps)
 
