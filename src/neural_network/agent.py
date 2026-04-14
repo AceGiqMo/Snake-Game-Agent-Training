@@ -25,10 +25,10 @@ class NetworkSpec:
     def __post_init__(self) -> None:
         if self.input_size <= 0:
             raise ValueError("input_size must be positive.")
-        if not (128 <= self.hidden1 <= 256):
-            raise ValueError("hidden1 must be in [128, 256].")
-        if not (64 <= self.hidden2 <= 128):
-            raise ValueError("hidden2 must be in [64, 128].")
+        if self.hidden1 <= 0:
+            raise ValueError("hidden1 must be positive")
+        if self.hidden2 <= 0:
+            raise ValueError("hidden2 must be in positive")
         if self.output_size != 4:
             raise ValueError("output_size must be 4 (up/down/left/right).")
 
@@ -47,18 +47,17 @@ class MLP:
         self.spec = spec
         self.rng = rng or np.random.default_rng()
 
-        # Xavier/Glorot-like init for ReLU layers: N(0, sqrt(2/fan_in))
-        self.W1 = self.rng.normal(0.0, np.sqrt(2.0 / spec.input_size), size=(spec.input_size, spec.hidden1)).astype(
+        self.W1 = self.rng.uniform(low=-20, high=20, size=(spec.input_size, spec.hidden1)).astype(
             np.float32
         )
         self.b1 = np.zeros((spec.hidden1,), dtype=np.float32)
 
-        self.W2 = self.rng.normal(0.0, np.sqrt(2.0 / spec.hidden1), size=(spec.hidden1, spec.hidden2)).astype(
+        self.W2 = self.rng.uniform(low=-20, high=20, size=(spec.hidden1, spec.hidden2)).astype(
             np.float32
         )
         self.b2 = np.zeros((spec.hidden2,), dtype=np.float32)
 
-        self.W3 = self.rng.normal(0.0, np.sqrt(2.0 / spec.hidden2), size=(spec.hidden2, spec.output_size)).astype(
+        self.W3 = self.rng.uniform(low=-20, high=20, size=(spec.hidden2, spec.output_size)).astype(
             np.float32
         )
         self.b3 = np.zeros((spec.output_size,), dtype=np.float32)
@@ -162,10 +161,10 @@ class SnakeAgent:
     def __init__(
         self,
         *,
-        input_size: int = 23,
-        hidden1: int = 256,
-        hidden2: int = 128,
-        rng: Optional[np.random.Generator] = None,
+        input_size: int = 17,
+        hidden1: int = 32,
+        hidden2: int = 16,
+        rng: Optional[np.random.Generator] = None
     ):
 
         self.spec = NetworkSpec(input_size=input_size, hidden1=hidden1, hidden2=hidden2, output_size=4)

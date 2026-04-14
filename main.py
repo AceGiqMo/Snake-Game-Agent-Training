@@ -2,18 +2,25 @@ import os
 import sys
 import logging
 import sqlite3
+import copy
 
 import numpy as np
 
-from src.snake import SnakeGame
+from src.snake_game import SnakeGame
 from src.pso import PSO
-from src.map_manager import MapManager
+from src.map_tools.map_manager import MapManager
 from src.neural_network.agent import SnakeAgent
 from src.neural_network import features_extractor
 
 from src.tracker import save_game_actions
-from src.tracker import save_epoch_parameters
+from src.tracker import save_food_positions
+from src.tracker import save_projected_parameters
+from src.tracker import save_buffered_projected_parameters
+from src.tracker import save_used_map
 from src.tracker import update_best_parameters
+from src.tracker import update_last_parameters
+
+import src.projection_tools.projectors as projectors
 
 # --------------------------
 # GENERAL CONFIGURATION
@@ -22,19 +29,20 @@ GRID_SIZE = 20
 CELL_SIZE = 30
 WIDTH, HEIGHT = GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE
 GAME_MODE = 1
-AGENTS_NUM = 75
+AGENTS_NUM = 20000
 MAPS_NUM = 50
 MAX_EXPECTED_FRAMES = 1000
+RANDOM_SEED = 33
 
 # --------------------------
 # PSO CONFIGURATION
 # --------------------------
-PSO_LOWER_BOUND = -10
-PSO_UPPER_BOUND = 10
+PSO_LOWER_BOUND = -20
+PSO_UPPER_BOUND = 20
 PSO_INERTIA = 0.9
 PSO_C1 = 1.5
 PSO_C2 = 1.5
-MAX_EPOCH_NUM = 10
+MAX_EPOCH_NUM = 30
 
 # --------------------------
 # COLORS
@@ -45,7 +53,10 @@ SUPER_FOOD_COLOR = (0, 180, 255)
 # --------------------------
 # LOGGING CONFIGURATION
 # --------------------------
-session_num = len(os.listdir("logs")) + 1
+session_num = len(os.listdir("logs"))
+
+if ".DS_Store" not in os.listdir("logs"):
+    session_num += 1
 
 logger = logging.getLogger("main")
 logger.setLevel(logging.DEBUG)
@@ -104,20 +115,31 @@ class Main:
                                  inertia=pso_inertia,
                                  c1=pso_c1,
                                  c2=pso_c2)
+
+            # The algorithms for projecting the high-dimensional points into 2D place for visualization of training
+            projectors.load_fitted_pca()
+            projectors.load_fitted_umap()
+
+            # Points buffer for projection algorithms training
+            self.__points_buffer = np.zeros(shape=(20 * len(self.agents), self.agents[0].num_parameters()))
+            self.__fitness_buffer = np.zeros(shape=20 * len(self.agents))
+
         except:
-            logging.exception("Initialization failed")
+            logger.exception("Initialization failed")
             sys.exit()
 
     def _initialize_maps(self, maps_num):
         """
         Loads maps if they do exist, otherwise it generates them from scratch
         """
-        logging.info("Initialization of maps...")
-        map_manager = MapManager(GRID_SIZE, GRID_SIZE, snake_start_cells=self.snake_start_cells)
+        logger.info("Initialization of maps...")
+        map_manager = MapManager(GRID_SIZE, GRID_SIZE, rng=self.rng, snake_start_cells=self.snake_start_cells)
 
         self.maps = map_manager.load_maps()
 
         if len(self.maps) != maps_num:
+            logger.warning("The required map amount does coincide with the existing ones. "
+                           "New maps are getting generated...")
             self.maps = map_manager.generate_maps(maps_num)
             map_manager.save_maps(self.maps)
 
@@ -126,7 +148,7 @@ class Main:
         Loads agents (from the latest epoch) from the table `parameters` of the database `train_tracking.db`.
         If `parameters` is empty, then it randomly initializes the parameters of the agents
         """
-        logging.info("Initialization of agents...")
+        logger.info("Initialization of agents...")
         self.agents = []
 
         for _ in range(agents_num):
@@ -137,25 +159,30 @@ class Main:
             cursor = conn.cursor()
 
             # Get the latest epoch
-            cursor.execute("SELECT MAX(epoch) FROM parameters")
-            latest_epoch = cursor.fetchone()[0]
+            cursor.execute("SELECT DISTINCT epoch FROM last_parameters")
+            latest_epoch = cursor.fetchone()
 
             # The table is empty
             if latest_epoch is None:
                 return
 
-            cursor.execute("SELECT neural_network FROM parameters WHERE epoch = ?", (latest_epoch,))
+            cursor.execute("SELECT position FROM last_parameters")
             parameters = cursor.fetchall()
 
             # The training configuration was changed, we must start from scratch
             if len(parameters) != len(self.agents):
-                cursor.execute("DELETE FROM parameters")
-                cursor.execute("DELETE FROM game_tracks")
-                logging.warning("Training configuration was changed, "
-                                "the `parameters` and `game_tracks` tables were truncated")
+                cursor.execute("DELETE FROM agent_actions")
+                cursor.execute("DELETE FROM food_pos_tracks")
+                cursor.execute("DELETE FROM maps_used")
+                cursor.execute("DELETE FROM last_parameters")
+                cursor.execute("DELETE FROM best_parameters")
+                cursor.execute("DELETE FROM pso_projection")
+                logger.warning("Training configuration was changed, "
+                                "the tables, related to training monitoring, were truncated")
+
                 return
 
-            self.epoch = latest_epoch + 1
+            self.epoch = latest_epoch[0] + 1
 
             cursor.close()
 
@@ -170,7 +197,7 @@ class Main:
         the progress made be previous sessions
         """
 
-        logging.info("Initialization of PSO algorithm...")
+        logger.info("Initialization of PSO algorithm...")
         positions = np.array([agent.get_weights() for agent in self.agents])
 
         self.pso = PSO(
@@ -201,18 +228,12 @@ class Main:
         with sqlite3.connect(f"{os.getcwd()}/train_tracking.db") as conn:
             cursor = conn.cursor()
 
+            # Neural network is a synonym for position
             cursor.execute("SELECT neural_network, fitness FROM best_parameters")
             pso_stored_bests = cursor.fetchall()
 
-            # The training configuration was changed, it is better to start from scratch
-            if len(pso_stored_bests) != len(self.agents):
-                cursor.execute("DELETE FROM best_parameters")
-                logging.warning("Training configuration was changed, `best_parameters` table was truncated")
-                return
-
             # Extract last fitnesses of agents
-            cursor.execute("SELECT neural_network, velocity, fitness FROM parameters WHERE epoch = ?",
-                           (self.epoch - 1,))
+            cursor.execute("SELECT position, velocity, fitness FROM last_parameters")
             last_parameters = cursor.fetchall()
 
             cursor.close()
@@ -224,19 +245,24 @@ class Main:
         agent_last_fitnesses = np.full(shape=self.pso.popsize, fill_value=0.0)
 
         for i in range(len(pso_stored_bests)):
-            agent_bests[i] = np.frombuffer(pso_stored_bests[i][0])
+            try:
+                # Sometimes, the array is converted from float32 to bytes, and sometimes, float64 to bytes
+                agent_bests[i] = np.frombuffer(pso_stored_bests[i][0], dtype=np.float32)
+            except ValueError:
+                agent_bests[i] = np.frombuffer(pso_stored_bests[i][0], dtype=np.float64)
+
             agent_best_fitnesses[i] = pso_stored_bests[i][1]
-            agent_last_positions[i] = np.frombuffer(last_parameters[i][0])
-            agent_last_velocities[i] = np.frombuffer(last_parameters[i][1])
+            agent_last_positions[i] = np.frombuffer(last_parameters[i][0], dtype=np.float64)
+            agent_last_velocities[i] = np.frombuffer(last_parameters[i][1], dtype=np.float64)
             agent_last_fitnesses[i] = last_parameters[i][2]
 
-        self.pso.restore_best_points(agent_bests)
         self.pso.restore_best_fitnesses(agent_best_fitnesses)
+        self.pso.restore_best_points(agent_bests)
         self.pso.restore_positions(agent_last_positions)
         self.pso.restore_velocities(agent_last_velocities)
         self.pso.restore_last_fitnesses(agent_last_fitnesses)
 
-    def _update_database(self, snake_games):
+    def _update_database(self, snake_games, map_number):
         """
         Fills the `parameters` table with the current epoch data.
         Fills the `game_tracks` with the tracked actions made by each agent in the games of the current epoch
@@ -244,23 +270,67 @@ class Main:
         """
         with sqlite3.connect(f"{os.getcwd()}/train_tracking.db") as conn:
             cursor = conn.cursor()
+            # cursor.execute("PRAGMA foreign_keys = on")
 
             for i in range(len(snake_games)):
                 save_game_actions(db_cursor=cursor, agent_id=i + 1, actions_dict=snake_games[i]._actions,
                                   epoch_num=self.epoch)
+                save_food_positions(db_cursor=cursor, agent_id=i + 1, food_pos_dict=snake_games[i]._food_history,
+                                    epoch_num=self.epoch)
 
-            logging.debug("All game actions of each agent were saved into the database")
+            logger.debug("All game actions of each agent and food positions were saved into the database")
 
-            save_epoch_parameters(db_cursor=cursor, agents_num=len(self.agents), neural_networks=self.pso.positions,
-                                  velocities=self.pso.velocities, epoch_num=self.epoch, fitnesses=self.pso.fitnesses)
-
-            logging.debug("Each agent' parameters were saved into the database")
+            save_used_map(db_cursor=cursor, epoch_num=self.epoch, map_number=map_number)
+            logger.debug("The used map was saved into the database")
 
             update_best_parameters(db_cursor=cursor, agents_num=len(self.agents),
                                    best_neural_networks=self.pso.local_bests,
                                    best_fitnesses=self.pso.local_best_fitnesses)
+            logger.debug("The table of best agents was updated in the database")
 
-            logging.debug("The table of best agents was updated in the database")
+            update_last_parameters(db_cursor=cursor, agents_num=len(self.agents), epoch_num=self.epoch,
+                                   positions=self.pso.positions, velocities=self.pso.velocities,
+                                   fitnesses=self.pso.fitnesses)
+            logger.debug("Last agents' parameters were updated in the database")
+
+
+            if projectors.projectors_ready:
+                # Pre-projected via PCA points onto 50-100 dimensional subspace for accelerating the UMAP projection
+                pca_projected_points = projectors.pca.transform(self.pso.positions)
+
+                # Projection of 50-100 dimensional points onto 2D plane via UMAP
+                umap_projected_points = projectors.umap.transform(pca_projected_points)
+
+                save_projected_parameters(db_cursor=cursor, agents_num=len(self.agents), epoch_num=self.epoch,
+                                          positions=umap_projected_points, fitnesses=self.pso.fitnesses)
+                logger.debug("Each agent's positions were projected onto 2D plane for further visualization")
+
+            else:
+                idx_start = (self.epoch - 1) * len(self.agents)
+                idx_end = self.epoch * len(self.agents)
+
+                self.__points_buffer[idx_start:idx_end] = copy.deepcopy(self.pso.positions)
+                self.__fitness_buffer[idx_start:idx_end] = copy.deepcopy(self.pso.fitnesses)
+
+                if self.epoch == 10:
+                    projectors.pca.fit(self.__points_buffer[:10 * len(self.agents)])
+                    logger.debug(f"PCA was fitted by {10 * len(self.agents)} samples")
+
+                if self.epoch == 20:
+                    pca_projected_points = projectors.pca.transform(self.__points_buffer)
+                    umap_projected_points = projectors.umap.fit_transform(pca_projected_points)
+
+                    logger.debug(f"UMAP was fitted by {20 * len(self.agents)} samples")
+
+                    save_buffered_projected_parameters(db_cursor=cursor, agents_num=len(self.agents),
+                                                       positions=umap_projected_points, fitnesses=self.__fitness_buffer)
+
+                    logger.debug("Buffered positions were projected onto 2D plane and saved into database")
+
+                    projectors.save_fitted_pca()
+                    projectors.save_fitted_umap()
+
+                    projectors.projectors_ready = True
 
             cursor.close()
 
@@ -271,16 +341,16 @@ class Main:
                                column_size=self.column_size,
                                snake_start_cells=self.snake_start_cells,
                                map=self.rng.choice(self.maps),
-                               rng=self.rng) for _ in range(len(self.agents)) for _ in range(len(self.agents))]
+                               rng=self.rng) for _ in range(len(self.agents))]
 
         try:
             for _ in range(max_epoch_num):
-                logging.info(f"EPOCH {_} => CURRENT_BEST_FITNESS = {self.pso.global_best_fitness}")
+                logger.info(f"EPOCH {self.epoch} => CURRENT_BEST_FITNESS = {self.pso.global_best_fitness}")
 
                 map_index = self.rng.integers(low=0, high=len(self.maps) - 1)
                 map = self.maps[map_index]
 
-                logging.debug(f"The map_{map_index + 1} was chosen for the epoch")
+                logger.debug(f"The map_{map_index + 1} was chosen for the epoch")
 
                 fitnesses = np.full(fill_value=-1, shape=len(self.agents))
 
@@ -298,8 +368,6 @@ class Main:
                             current_dir=game.direction,
                             food_pos=game.food,
                             superfood_pos=game.super_food,
-                            superfood_time_left=game.super_food_timer,
-                            superfood_max_time=game.super_food_max_time,
                             current_tick=game.frame,
                             max_expected_ticks=MAX_EXPECTED_FRAMES
                         )
@@ -312,13 +380,14 @@ class Main:
                         game.score * 100 +                       # Primary: game score
                         game.frame * 0.1 +                       # Secondary: survival time
                         game.eaten_food * 50 +                   # Bonus: food collected
-                        (1000 - game.frames_survived) * 0.01 +   # Small penalty for time (encourages speed)
+                        (1000 - game.frame) * 0.01 +   # Small penalty for time (encourages speed)
                         game.super_food_eaten * 100              # Bonus for super food
                     )
 
                     status = "VICTORY" if game.victory else "LOSS"
-                    logging.debug(f"Agent {game_index + 1} completed the game with {status} "
-                                  f"and fitness = {fitnesses[game_index]}")
+                    logger.debug(f"Agent {game_index + 1} completed the game with {status} "
+                                  f"and fitness = {fitnesses[game_index]} | "
+                                 f"[food_overall = {game.eaten_food}, super_food = {game.super_food_eaten}]")
 
                     game_index += 1
 
@@ -326,7 +395,7 @@ class Main:
                 # the computed fitnesses are passed manually to PSO method
                 self.pso.update_fitness(np.array(fitnesses))
 
-                self._update_database(snake_games=snake_games)
+                self._update_database(snake_games=snake_games, map_number=int(map_index + 1))
 
                 self.pso.update_velocities()
                 self.pso.update_positions()
@@ -334,10 +403,13 @@ class Main:
                 self.epoch += 1
 
         except:
-            logging.exception("Fatal error occurred during the training")
+            logger.exception("Fatal error occurred during the training")
             sys.exit()
+
+        else:
+            logger.info("The training session was successfully completed")
 
 
 if __name__ == "__main__":
-    main = Main()
+    main = Main(rng=np.random.default_rng(seed=RANDOM_SEED))
     main.train()
